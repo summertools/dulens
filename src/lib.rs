@@ -6,12 +6,16 @@ use std::process::ExitCode;
 
 use clap::ValueEnum;
 
+mod cleanup;
+mod cleanup_ui;
 pub mod cli;
 mod format;
 mod render;
 mod scan;
+mod term;
 mod tui;
 
+use cleanup_ui::CleanupOptions;
 use cli::{Cli, ColorChoice};
 use render::RenderOptions;
 use scan::{Excludes, ScanOptions, Scanner, Tree};
@@ -29,6 +33,13 @@ pub fn run(cli: Cli) -> Result<ExitCode, Box<dyn Error>> {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "interactive mode requires a terminal on stdin and stdout",
+        )
+        .into());
+    }
+    if cli.cleanup && (!stdout_is_terminal || !io::stdin().is_terminal()) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "cleanup mode requires a terminal on stdin and stdout; use it interactively",
         )
         .into());
     }
@@ -66,6 +77,47 @@ pub fn run(cli: Cli) -> Result<ExitCode, Box<dyn Error>> {
     };
     let metric = cli.metric();
     let unit = cli.size_unit();
+
+    if cli.cleanup {
+        let (settings, mut cleanup_warnings) =
+            cleanup::load_settings(cli.config.as_deref(), cli.clean_profile.as_deref())
+                .map_err(|message| io::Error::new(io::ErrorKind::InvalidInput, message))?;
+        let detection = cleanup::detect(&tree, &settings);
+        cleanup_warnings.extend(detection.warnings.iter().cloned());
+        cleanup_warnings.extend(tree.warnings.iter().cloned());
+        if detection.candidates.is_empty() {
+            for warning in &cleanup_warnings {
+                eprintln!("dulens: warning: {}", format::sanitize_text(warning));
+            }
+            eprintln!("dulens: no build cache or dependency candidates found");
+            return Ok(if tree.error_count > 0 {
+                ExitCode::FAILURE
+            } else {
+                ExitCode::SUCCESS
+            });
+        }
+        let report = cleanup_ui::run(
+            detection.candidates,
+            CleanupOptions {
+                color,
+                unit,
+                profile: settings.profile.clone(),
+            },
+        )?;
+        for warning in &cleanup_warnings {
+            eprintln!("dulens: warning: {}", format::sanitize_text(warning));
+        }
+        if report.failed() {
+            for error in &report.errors {
+                eprintln!("dulens: cleanup: {}", format::sanitize_text(error));
+            }
+        }
+        return Ok(if tree.error_count > 0 || report.failed() {
+            ExitCode::FAILURE
+        } else {
+            ExitCode::SUCCESS
+        });
+    }
 
     if cli.interactive {
         let options = TuiOptions {

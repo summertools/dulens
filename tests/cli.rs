@@ -76,6 +76,23 @@ fn reports_missing_paths_with_a_nonzero_exit_status() {
 }
 
 #[test]
+fn cleanup_mode_requires_a_terminal() {
+    let output = Command::new(bin())
+        .arg("--cleanup")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .output()
+        .expect("run dulens --clean");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("cleanup mode requires a terminal"),
+        "stderr: {stderr}"
+    );
+}
+
+#[test]
 fn interactive_mode_requires_a_terminal() {
     let temp = TempDir::new().unwrap();
     let output = command().args(["-i"]).arg(temp.path()).output().unwrap();

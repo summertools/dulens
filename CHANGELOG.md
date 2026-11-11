@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-11
+
+### Added
+
+- Interactive cleanup mode: `dulens --cleanup` scans build caches, tool caches,
+  and dependency directories, preselects safe build/cache entries, and lets you
+  browse, filter, deselect, and confirm removal before anything is deleted.
+- Marker-backed detection for Cargo, Go, Node/npm/yarn/pnpm/bun, Python, Java,
+  Kotlin, Scala, C/C++, .NET, Swift, Ruby, PHP, Elixir/Erlang, Haskell, Zig,
+  Dart/Flutter, Terraform, R, Crystal, OCaml, Elm, Unity, Unreal, and common
+  global package/cache locations.
+- Cleanup profiles `safe`, `deep`, `dependencies`, and `all`, plus custom
+  profiles, extra cache/dependency globs, and global-cache toggles in
+  `~/.config/dulens/config.toml` (or `--config` / `DULENS_CONFIG`).
+- Defensive deletion: canonical path containment, symlink refusal, protected
+  path checks, explicit confirmation, and per-path error reporting.
+
+### Changed
+
+- `--clean` remains the compatibility alias for `--plain`; the new cleanup
+  entry point is `--cleanup` (alias `--clean-caches`).
+- Added the new full-screen cleanup checklist with category filters, size/name
+  sorting, selection summaries, and an ASCII-safe text fallback.
+
 ## [0.1.0] - 2026-11-07
 
 ### Added
@@ -30,5 +54,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - macOS Intel: `dulens-v0.1.0-x86_64-apple-darwin.tar.gz`
 - macOS Apple Silicon: `dulens-v0.1.0-aarch64-apple-darwin.tar.gz`
 
-[Unreleased]: https://github.com/summertools/dulens/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/summertools/dulens/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/summertools/dulens/releases/tag/v0.2.0
 [0.1.0]: https://github.com/summertools/dulens/releases/tag/v0.1.0

@@ -6,8 +6,9 @@ English | [简体中文](README.zh-CN.md)
 
 `dulens` scans files and directories and shows where the space went. It offers a
 colored tree with sizes, percentages, and bar charts, a full-screen
-keyboard-driven browser, and a plain layout for scripts and logs. It is
-read-only and requires no configuration.
+keyboard-driven browser, and a plain layout for scripts and logs. Normal
+scanning is read-only and requires no configuration; the optional cleanup mode
+only deletes explicitly selected folders after a confirmation screen.
 
 ## Contents
 
@@ -19,6 +20,7 @@ read-only and requires no configuration.
   - [Options](#options)
   - [Environment variables](#environment-variables)
   - [Interactive keys](#interactive-keys)
+- [Cleanup mode](#cleanup-mode)
 - [Understanding the output](#understanding-the-output)
 - [How sizes are measured](#how-sizes-are-measured)
 - [Excluding paths](#excluding-paths)
@@ -61,6 +63,9 @@ top-level root, and top-level percentages use the combined total.
   spoof the layout.
 - Plain mode without colors, bars, percentages, tree connectors, or a header in
   static output.
+- Safe interactive cleanup mode for marker-backed build caches and dependency
+  directories across major language toolchains, with profiles, previews and
+  explicit confirmation before deletion.
 - Honest exit status: scan errors are reported on stderr and produce a failure
   status.
 
@@ -158,6 +163,9 @@ stderr. With `-i`, `dulens` takes over the terminal until you quit.
 | `-d, --depth <N>` | `2` | Levels of children to display below each root. `0` shows roots only. |
 | `-a, --all` | off | Show files as well as directories. Alias: `--files`. |
 | `-i, --interactive` | off | Start the full-screen interactive browser. |
+| `--cleanup` | off | Open the interactive build-cache and dependency cleanup checklist. Requires a terminal. |
+| `--clean-profile <NAME>` | `safe` | Cleanup preset: `safe`, `deep`, `dependencies`, `all`, or a profile from the config file. |
+| `--config <FILE>` | platform config | Read cleanup presets from `FILE`; requires `--cleanup`. |
 | `-p, --plain` | off | Clean monochrome layout; in static output it omits the header, bars, percentages, colors, and tree connectors. Aliases: `--simple`, `--clean`. |
 | `--apparent-size` | off | Count logical file lengths instead of allocated disk blocks. |
 | `--si` | off | Use powers of 1000 (`kB`, `MB`, ...). Conflicts with `--bytes`. |
@@ -190,6 +198,7 @@ Notes:
 | `TERM` | `TERM=dumb` disables color in `auto` mode. A value containing `256color` selects the 256-color palette. |
 | `COLORTERM` | A value containing `truecolor` or `24bit` selects 24-bit color. |
 | `COLUMNS` | Output width when stdout is not a terminal. Values below `20` are ignored; the default is `100`. |
+| `DULENS_CONFIG` | Cleanup config path when `--config` is not given (default: `~/.config/dulens/config.toml`). |
 
 `NO_COLOR`, `CLICOLOR`, `TERM`, and `COLORTERM` only affect `--color auto`,
 which is the default; they do not override `--color always`, `--plain`, or
@@ -219,6 +228,103 @@ it. Otherwise it starts at the synthetic "all paths" root. Interactive mode
 always lists both files and directories; `--depth` and `--all` do not apply
 there. Scan warnings are held until you leave the browser, then printed to
 stderr unless `--quiet` is set.
+
+## Cleanup mode
+
+`dulens --cleanup` scans the given paths (the current directory by default) and
+opens a checklist of regenerable build outputs, tool caches, and dependency
+directories.
+
+```bash
+dulens --cleanup                     # safe profile, current directory
+dulens --cleanup ~/projects          # scan several project trees
+dulens --cleanup --clean-profile deep ~/projects
+dulens --cleanup --config ~/.config/dulens/work.toml .
+```
+
+The initial selection is deliberately conservative:
+
+- **BUILD** (selected): `target`, `build`, `cmake-build-*`, `bin`/`obj` for
+  .NET, `_build`, `dist-newstyle`, `.stack-work`, `zig-out`, `.build` and
+  similar marker-backed build directories. They are recreated by the normal
+  language toolchain.
+- **CACHE** (selected): `__pycache__`, `.pytest_cache`, `.mypy_cache`,
+  `.ruff_cache`, `.gradle`, `.next`, `.nuxt`, `.svelte-kit`, `.turbo`,
+  `.parcel-cache`, `.vite`, Zig caches, and similar regenerable tool caches.
+- **DEPS** (not selected): `node_modules`, `vendor` for Go/PHP/Ruby, Python
+  virtual environments, Elixir `deps`, iOS `Pods`, and global package stores.
+  These can be restored, but reinstalling them may require network access, so
+  they are never selected by default; use a profile or toggle them explicitly.
+
+A directory is only identified when the expected project marker is present:
+`Cargo.toml` for Cargo `target`, `package.json` or a lockfile for
+`node_modules`, `go.mod` for Go `vendor`, `mix.exs` for Elixir, and so on. This
+avoids offering unrelated directories that merely happen to be named `build`.
+
+### Cleanup keys
+
+| Key | Action |
+| --- | --- |
+| `↑` / `k`, `↓` / `j` | Move through candidates |
+| `PgUp` / `PgDn`, `g` / `G` | Page, first, last |
+| `Space` | Toggle the selected folder |
+| `a` / `n` | Select all / none in the current filter |
+| `f`, `Tab`, `←` / `→` | Cycle filters: all, build, cache, deps |
+| `s` | Toggle size/name sorting |
+| `Enter` | Review the final list and open confirmation |
+| `y` | Confirm permanent deletion (only in the confirmation screen) |
+| `n` / `Esc` / `q` | Cancel the confirmation or leave cleanup |
+
+Nothing is deleted while browsing. The confirmation screen lists every selected
+path and the total size, and only `y` performs the removal.
+
+### Profiles and configuration
+
+The config file is optional. The default location is
+`~/.config/dulens/config.toml` (or `$XDG_CONFIG_HOME/dulens/config.toml`);
+`--config` and `DULENS_CONFIG` override it. An explicit config error is reported
+as a failure, while a malformed implicit config falls back to safe defaults with
+a warning.
+
+```toml
+[cleanup]
+profile = "safe"          # default profile
+include_global = true     # include known global build/tool caches
+include_global_dependencies = false  # also include global package stores
+default = "build"         # build | dependencies | all | none
+extra_cache = ["scratch-cache", "*-tmp-cache"]
+extra_dependencies = ["vendor-custom"]
+
+[cleanup.profiles.work]
+include_global = true
+include_global_dependencies = true
+default = "build"
+extra_cache = ["ci-cache"]
+```
+
+Built-in profiles: `safe` (global build/tool caches, dependency entries
+unselected), `deep` (global dependency stores visible), `dependencies`
+(dependency/cache preselection), and `all` (everything preselected). A profile
+defined in the file can override `include_global`,
+`include_global_dependencies`, `default`, `extra_cache`, and `extra_dependencies`; CLI `--clean-profile` wins over `cleanup.profile`.
+
+Global build/tool caches are included in the safe profile because they are
+regenerable; global package stores need `include_global_dependencies = true`
+(the `deep` or `dependencies` profile). Known locations include Cargo's registry
+cache, Go's build and module caches, npm/yarn/pnpm/uv/pip caches,
+Gradle/Maven/NuGet stores, ccache/sccache, Dart/pub, Deno, Bazel and Xcode
+DerivedData (macOS). Environment overrides such as `CARGO_HOME`, `GOCACHE`,
+`GOMODCACHE`, `PIP_CACHE_DIR`, and `GRADLE_USER_HOME` are respected.
+
+### Deletion safety
+
+Before removal, every candidate is revalidated as a plain directory (symlinks
+are refused), canonicalized, and checked against the scan root. `dulens` refuses
+to delete a scan root, a path containing the current directory or home, or the
+usual protected system paths. A partially failed removal is reported per path
+and makes the command exit nonzero. Global caches must still match their exact
+known location. Reported sizes are allocated disk usage; hard-linked or shared
+content can make the actual reclaimed space smaller.
 
 ## Understanding the output
 
@@ -370,7 +476,7 @@ scanned.
 
 ## Plain mode
 
-`-p` / `--plain` (aliases `--simple` and `--clean`) produces a clean,
+`-p` / `--plain` (alias `--simple`) produces a clean,
 monochrome layout. In static output it omits the header, colors, bars,
 percentages, and tree connectors; each entry gets one line with a right-aligned
 size and an indented name. It still respects depth, files-versus-directories,
@@ -412,6 +518,8 @@ rows; below that it shows a short hint instead of the browser.
 | `dulens --plain -d 3 ~/projects` | Clean size-and-name output |
 | `dulens --apparent-size --si /var` | Logical sizes with decimal units |
 | `dulens -i --apparent-size /var` | Browse logical sizes interactively |
+| `dulens --cleanup` | Review build caches and dependencies in the current tree |
+| `dulens --cleanup --clean-profile deep ~/projects` | Include known global caches as optional candidates |
 | `dulens --sort name --reverse -E target -E node_modules .` | Reverse name order while skipping build directories |
 | `dulens -x -d 1 /home` | Stay on the starting filesystem |
 | `dulens --bytes --apparent-size -d 1 .` | Exact byte counts, one level |
@@ -434,7 +542,8 @@ cargo clippy --all-targets -- -D warnings
 
 The test suite covers size formatting, percentages and bars, width fitting
 (including wide Unicode names and very large sizes), sorting, excludes, hard
-links, symlinks, error handling, plain mode, and CLI behavior.
+links, symlinks, error handling, plain mode, cleanup discovery, profile
+resolution, deletion guards, and CLI behavior.
 
 ## Project layout
 
@@ -444,6 +553,8 @@ links, symlinks, error handling, plain mode, and CLI behavior.
 | `src/lib.rs` | Orchestrates scanning, rendering, color and width detection, warnings, and exit status |
 | `src/cli.rs` | Command-line definition and flag-to-option mapping |
 | `src/scan.rs` | Filesystem walk, size accounting, hard-link and directory deduplication, excludes |
+| `src/cleanup.rs` | Marker-based cache/dependency discovery, profiles, and safe deletion |
+| `src/cleanup_ui.rs` | Interactive cleanup checklist and confirmation screen |
 | `src/format.rs` | Size, percentage, and bar formatting; width-aware truncation; name sanitization; color palette |
 | `src/render.rs` | Non-interactive tree rendering |
 | `src/tui.rs` | Interactive terminal browser |
@@ -457,7 +568,9 @@ links, symlinks, error handling, plain mode, and CLI behavior.
 - The scan is sequential and single-threaded. Very large or remote trees can
   take time to traverse.
 - The result is a snapshot taken at launch; there are no live updates.
-- The tool is read-only: it never deletes, moves, or modifies files.
+- Normal scanning is read-only. Cleanup mode (`--cleanup`) is the only path
+  that modifies the filesystem, and it never deletes anything until you select
+  folders and press `y` on the confirmation screen.
 - Interactive mode requires both stdin and stdout to be terminals, and needs at
   least a 40-by-8 terminal window.
 - The interactive browser has no mouse support, search, filtering, or deletion.

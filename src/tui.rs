@@ -1,14 +1,10 @@
 use std::fmt::Write as _;
 use std::io::{self, Write};
 
-use crossterm::cursor::{Hide, MoveTo, Show};
+use crossterm::cursor::MoveTo;
 use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use crossterm::style::ResetColor;
-use crossterm::terminal::{
-    self, BeginSynchronizedUpdate, Clear, ClearType, EndSynchronizedUpdate, EnterAlternateScreen,
-    LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
-};
-use crossterm::{execute, queue};
+use crossterm::queue;
+use crossterm::terminal::{self, BeginSynchronizedUpdate, Clear, ClearType, EndSynchronizedUpdate};
 
 use crate::SortKey;
 use crate::format::{
@@ -27,41 +23,7 @@ pub struct TuiOptions {
     pub reverse: bool,
 }
 
-struct TerminalGuard;
-
-impl TerminalGuard {
-    fn enter() -> io::Result<Self> {
-        enable_raw_mode()?;
-        if let Err(error) = execute!(
-            io::stdout(),
-            EnterAlternateScreen,
-            Hide,
-            Clear(ClearType::All),
-            MoveTo(0, 0)
-        ) {
-            restore_terminal();
-            return Err(error);
-        }
-        Ok(Self)
-    }
-}
-
-impl Drop for TerminalGuard {
-    fn drop(&mut self) {
-        restore_terminal();
-    }
-}
-
-fn restore_terminal() {
-    let _ = execute!(
-        io::stdout(),
-        Show,
-        ResetColor,
-        LeaveAlternateScreen,
-        MoveTo(0, 0)
-    );
-    let _ = disable_raw_mode();
-}
+use crate::term::TerminalGuard;
 
 struct HistoryEntry {
     current: NodeId,

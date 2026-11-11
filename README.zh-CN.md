@@ -4,7 +4,7 @@
 
 [English](README.md) | 简体中文
 
-`dulens` 扫描文件和目录，直观展示空间去了哪里。它提供带尺寸、占比和条形图的彩色树形视图、全屏键盘交互浏览器，以及适合脚本和日志的纯文本布局。工具只读，无需配置。
+`dulens` 扫描文件和目录，直观展示空间去了哪里。它提供带尺寸、占比和条形图的彩色树形视图、全屏键盘交互浏览器，以及适合脚本和日志的纯文本布局。普通扫描是只读的，无需配置；可选的清理模式只会在用户勾选并在确认页按下 `y` 后删除目录。
 
 ## 目录
 
@@ -16,6 +16,7 @@
   - [命令行选项](#命令行选项)
   - [环境变量](#环境变量)
   - [交互模式按键](#交互模式按键)
+- [清理模式](#清理模式)
 - [读懂输出](#读懂输出)
 - [大小如何计算](#大小如何计算)
 - [排除路径](#排除路径)
@@ -50,6 +51,8 @@
 - 宽度感知渲染，适配窄终端和宽字符（CJK）文件名。
 - 打印前会转义文件名中的控制字符和 Unicode 双向文本控制符，恶意文件名无法注入终端转义序列或伪造布局。
 - 纯文本模式不显示颜色、条形图、百分比、树形连接线，静态输出中也不显示标题。
+- 面向主流语言工具链的安全交互清理模式：识别编译缓存/依赖目录，支持预设、预览和
+  明确确认后删除。
 - 如实反映退出状态：扫描错误会写入 stderr，并产生失败状态。
 
 ## 输出示例
@@ -140,6 +143,9 @@ dulens --plain -d 3 .          # 无任何装饰，适合管道
 | `-d, --depth <N>` | `2` | 每个根路径下展示的子层级数。`0` 只显示根。 |
 | `-a, --all` | 关闭 | 同时显示文件和目录。别名：`--files`。 |
 | `-i, --interactive` | 关闭 | 启动全屏交互浏览器。 |
+| `--cleanup` | 关闭 | 打开编译缓存/依赖目录清理清单；需要终端。 |
+| `--clean-profile <NAME>` | `safe` | 清理预设：`safe`、`deep`、`dependencies`、`all` 或配置中的 profile。 |
+| `--config <FILE>` | 平台配置路径 | 从 `FILE` 读取清理预设；需配合 `--cleanup`。 |
 | `-p, --plain` | 关闭 | 干净的等宽布局；静态输出不显示标题、条形图、百分比、颜色和树形连接线。别名：`--simple`、`--clean`。 |
 | `--apparent-size` | 关闭 | 统计文件的逻辑长度，而不是已分配的磁盘块。 |
 | `--si` | 关闭 | 使用 1000 的幂（`kB`、`MB` 等）。与 `--bytes` 冲突。 |
@@ -170,6 +176,7 @@ dulens --plain -d 3 .          # 无任何装饰，适合管道
 | `TERM` | `TERM=dumb` 时，`auto` 模式禁用颜色。值中包含 `256color` 时选择 256 色调色板。 |
 | `COLORTERM` | 值中包含 `truecolor` 或 `24bit` 时选择 24 位真彩色。 |
 | `COLUMNS` | stdout 不是终端时的输出宽度。小于 `20` 的值会被忽略；默认 `100`。 |
+| `DULENS_CONFIG` | 未指定 `--config` 时的清理配置路径（默认 `~/.config/dulens/config.toml`）。 |
 
 `NO_COLOR`、`CLICOLOR`、`TERM` 和 `COLORTERM` 只影响 `--color auto`（默认值），不会覆盖 `--color always`、`--plain` 或 `--no-color`。`COLUMNS` 仅在 stdout 不是终端时控制输出宽度。
 
@@ -192,6 +199,89 @@ dulens --plain -d 3 .          # 无任何装饰，适合管道
 | `Ctrl+C` | 退出 |
 
 如果只扫描了一个目录根，浏览器会直接进入该目录；否则从合成的“all paths”根开始。交互模式始终同时列出文件和目录；`--depth` 和 `--all` 在该模式下不生效。扫描警告会等到你退出浏览器后再写入 stderr；使用 `--quiet` 可抑制。
+
+## 清理模式
+
+`dulens --cleanup` 会扫描指定路径（默认当前目录），并打开可重建编译输出、工具缓存和依赖目录的清单：
+
+```bash
+dulens --cleanup                     # safe 预设，当前目录
+dulens --cleanup ~/projects          # 扫描多个项目
+dulens --cleanup --clean-profile deep ~/projects
+dulens --cleanup --config ~/.config/dulens/work.toml .
+```
+
+默认选择是保守的：
+
+- **BUILD**（默认选中）：`target`、`build`、`cmake-build-*`、.NET 的 `bin`/`obj`、
+  `_build`、`dist-newstyle`、`.stack-work`、`zig-out`、`.build` 等带项目标记的构建目录。
+- **CACHE**（默认选中）：`__pycache__`、`.pytest_cache`、`.mypy_cache`、`.ruff_cache`、
+  `.gradle`、`.next`、`.nuxt`、`.svelte-kit`、`.turbo`、`.parcel-cache`、`.vite`、
+  Zig 缓存等可重新生成的工具缓存。
+- **DEPS**（默认不选）：`node_modules`、Go/PHP/Ruby 的 `vendor`、Python 虚拟环境、
+  Elixir `deps`、iOS `Pods` 以及全局包存储。它们可以恢复，但重新安装可能需要网络，
+  因此默认不勾选。
+
+只有存在预期项目标记时才会识别目录，例如 Cargo 的 `Cargo.toml`、Node 的
+`package.json`/lockfile、Go 的 `go.mod`、Elixir 的 `mix.exs`。仅仅名字叫 `build`
+的普通目录不会被误删。
+
+### 清理快捷键
+
+| 按键 | 操作 |
+| --- | --- |
+| `↑` / `k`、`↓` / `j` | 移动候选条目 |
+| `PgUp` / `PgDn`、`g` / `G` | 翻页、第一项、最后一项 |
+| `Space` | 勾选/取消当前文件夹 |
+| `a` / `n` | 在当前过滤器中全选/全不选 |
+| `f`、`Tab`、`←` / `→` | 切换 all/build/cache/deps 过滤器 |
+| `s` | 切换尺寸/名称排序 |
+| `Enter` | 查看最终列表并进入确认页 |
+| `y` | 确认永久删除（仅确认页有效） |
+| `n` / `Esc` / `q` | 取消确认或退出 |
+
+浏览过程中不会删除任何内容。确认页会列出所有选中路径和总大小，只有按下 `y`
+才会真正执行删除。
+
+### 配置与预设
+
+配置文件可选，默认路径为 `~/.config/dulens/config.toml`，也支持
+`$XDG_CONFIG_HOME/dulens/config.toml`、`--config` 和 `DULENS_CONFIG`。显式指定的
+配置有错误时会直接失败；隐式默认配置损坏时会给出警告并使用安全默认值。
+
+```toml
+[cleanup]
+profile = "safe"          # 默认 profile
+include_global = true     # 扫描已知全局编译/工具缓存
+include_global_dependencies = false  # 是否连全局包存储也列出
+default = "build"         # build | dependencies | all | none
+extra_cache = ["scratch-cache", "*-tmp-cache"]
+extra_dependencies = ["vendor-custom"]
+
+[cleanup.profiles.work]
+include_global = true
+include_global_dependencies = true
+default = "build"
+extra_cache = ["ci-cache"]
+```
+
+内置 profile：`safe`（全局编译/工具缓存，依赖条目默认不选）、`deep`（显示全局依赖存储）、
+`dependencies`（预选依赖/缓存）和 `all`（预选全部）。配置文件中的 profile 可覆盖
+`include_global`、`include_global_dependencies`、`default`、`extra_cache` 和
+`extra_dependencies`；命令行 `--clean-profile` 优先于 `cleanup.profile`。
+
+全局编译/工具缓存默认在 safe profile 中扫描；全局包存储需要
+`include_global_dependencies = true`（`deep` 或 `dependencies` profile）。支持 Cargo
+registry 缓存、Go build/module 缓存、npm/yarn/pnpm/uv/pip、Gradle/Maven/NuGet、
+ccache/sccache、Dart/pub、Deno、Bazel，以及 macOS 的 Xcode DerivedData，并尊重
+`CARGO_HOME`、`GOCACHE`、`GOMODCACHE`、`PIP_CACHE_DIR`、`GRADLE_USER_HOME` 等环境变量。
+
+### 删除安全性
+
+实际删除前，每个候选都会重新验证为普通目录（拒绝符号链接）、规范化路径并检查是否
+位于扫描根内。扫描根本身、包含当前目录或 home 的路径，以及常见系统保护路径都会被
+拒绝。部分失败会按路径报告，并让命令返回非零状态；全局缓存必须仍然位于其已知的精确
+位置。显示的大小是已分配的磁盘占用；硬链接或共享内容可能使实际释放空间更小。
 
 ## 读懂输出
 
@@ -301,7 +391,7 @@ dulens: warning: /path: Permission denied
 
 ## 纯文本模式
 
-`-p` / `--plain`（别名 `--simple` 和 `--clean`）产生干净的单色布局。静态输出不显示标题、颜色、条形图、百分比和树形连接线；每个条目一行，右对齐尺寸，名称按层级缩进。它仍然遵循深度、文件/目录显示、排序、排除规则和宽度限制。该模式在交互浏览器中也可用：标题保留，颜色、条形图和百分比不显示，当前行用 `>` 标记。
+`-p` / `--plain`（别名 `--simple`）产生干净的单色布局。静态输出不显示标题、颜色、条形图、百分比和树形连接线；每个条目一行，右对齐尺寸，名称按层级缩进。它仍然遵循深度、文件/目录显示、排序、排除规则和宽度限制。该模式在交互浏览器中也可用：标题保留，颜色、条形图和百分比不显示，当前行用 `>` 标记。
 
 纯文本模式是脚本和可复现日志中最可预测的格式。即使同时指定 `--color always`，颜色也会被禁用。
 
@@ -331,6 +421,8 @@ dulens: warning: /path: Permission denied
 | `dulens --plain -d 3 ~/projects` | 干净的“尺寸 + 名称”输出 |
 | `dulens --apparent-size --si /var` | 使用十进制单位的逻辑大小 |
 | `dulens -i --apparent-size /var` | 交互浏览逻辑大小 |
+| `dulens --cleanup` | 查看并清理当前树中的编译缓存和依赖目录 |
+| `dulens --cleanup --clean-profile deep ~/projects` | 同时列出已知全局缓存（默认不勾选依赖） |
 | `dulens --sort name --reverse -E target -E node_modules .` | 反向名称排序，同时跳过构建目录 |
 | `dulens -x -d 1 /home` | 停留在起始文件系统内 |
 | `dulens --bytes --apparent-size -d 1 .` | 精确字节数，只显示一层 |
@@ -351,7 +443,7 @@ cargo fmt --all -- --check
 cargo clippy --all-targets -- -D warnings
 ```
 
-测试套件覆盖尺寸格式化、百分比与条形图、宽度适配（包括宽字符文件名和超大尺寸）、排序、排除规则、硬链接、符号链接、错误处理、纯文本模式和 CLI 行为。
+测试套件覆盖尺寸格式化、百分比与条形图、宽度适配（包括宽字符文件名和超大尺寸）、排序、排除规则、硬链接、符号链接、错误处理、纯文本模式、清理候选发现、profile 解析、删除保护和 CLI 行为。
 
 ## 项目结构
 
@@ -361,6 +453,8 @@ cargo clippy --all-targets -- -D warnings
 | `src/lib.rs` | 编排扫描、渲染、颜色与宽度检测、警告和退出状态 |
 | `src/cli.rs` | 命令行定义及选项到内部配置的映射 |
 | `src/scan.rs` | 文件系统遍历、大小统计、硬链接与目录去重、排除规则 |
+| `src/cleanup.rs` | 基于项目标记的缓存/依赖发现、预设和安全删除 |
+| `src/cleanup_ui.rs` | 交互清理清单与确认界面 |
 | `src/format.rs` | 尺寸、百分比和条形图格式化；宽度感知截断；名称清理；调色板 |
 | `src/render.rs` | 非交互树形渲染 |
 | `src/tui.rs` | 交互式终端浏览器 |
@@ -371,7 +465,8 @@ cargo clippy --all-targets -- -D warnings
 - Linux 和 macOS 是主要目标平台。在非 Unix 平台上，磁盘口径回退为逻辑文件长度，硬链接去重和 `--one-file-system` 不可用。
 - 扫描是顺序、单线程的。遍历非常大或远程的目录树可能需要较长时间。
 - 结果是启动时的快照，不会实时更新。
-- 工具是只读的：从不删除、移动或修改文件。
+- 普通扫描是只读的。只有 `--cleanup` 清理模式会修改文件系统，而且只在用户勾选
+  文件夹并在确认页按下 `y` 后才会删除。
 - 交互模式要求 stdin 和 stdout 都是终端，并且窗口至少为 40 × 8。
 - 交互浏览器不支持鼠标、搜索、过滤或删除。
 - 每次运行最多详细描述 32 条扫描警告。
